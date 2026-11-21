@@ -1,0 +1,10 @@
+[package]
+name = "ebook-parsers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ebook-core = { path = "../core" }
+thiserror.workspace = true
+zip = "2.2"
+roxmltree = "0.20"

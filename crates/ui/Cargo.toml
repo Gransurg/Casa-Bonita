@@ -1,0 +1,13 @@
+[package]
+name = "ebook-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ebook-core = { path = "../core" }
+ebook-db = { path = "../db" }
+ebook-parsers = { path = "../parsers" }
+anyhow.workspace = true
+gtk4 = { version = "0.9", features = ["v4_14"] }
+glib = "0.9"
+adw = { version = "0.7", package = "libadwaita" }

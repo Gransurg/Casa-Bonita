@@ -1,0 +1,157 @@
+/* Мягкая книжная палитра */
+@define-color accent_bg_color #435D4E;
+@define-color accent_fg_color #FFFFFF;
+@define-color accent_color #435D4E;
+
+/* Слегка приглушенный фон окна и сайдбара */
+window {
+    background-color: #FAF9F6;
+}
+
+.sidebar {
+    background-color: #F2F3EE;
+    border-right: 1px solid #E3E5DD;
+}
+
+/* Баннер «Сейчас читаете» */
+.reading-banner {
+    background-color: #EBF0E9;
+    border-radius: 16px;
+    border: 1px solid #DCE3D9;
+}
+
+/* Тонкий зеленый прогресс-бар */
+progressbar.reading-progress trough {
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: #D4DDD2;
+}
+
+progressbar.reading-progress progress {
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: #435D4E;
+}
+
+/* Обложка в баннере и карточки книг */
+.book-cover-green {
+    background-color: #4E685A;
+    color: #F4F1EA;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+.book-cover-terracotta {
+    background-color: #A66E4E;
+    color: #F4F1EA;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+.book-cover-slate {
+    background-color: #5C6B73;
+    color: #F4F1EA;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+.book-cover-sand {
+    background-color: #C2B59B;
+    color: #3A352F;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+/* Кнопки фильтрации */
+.filter-pill {
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.9em;
+}
+
+/* Вкладки сайдбара читалки */
+.reader-tab {
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    padding: 10px 12px;
+    border-bottom: 2px solid transparent;
+}
+
+.reader-tab:checked {
+    border-bottom: 2px solid #435D4E;
+    color: #2D3F35;
+    font-weight: bold;
+}
+
+/* Элементы оглавления */
+.chapter-row {
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+.chapter-row-current {
+    background-color: #E7EFE9;
+    border-left: 3px solid #435D4E;
+    font-weight: bold;
+}
+
+.chapter-badge-now {
+    background-color: #D7E5DC;
+    color: #365243;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.78em;
+}
+
+/* Карточка заметки */
+.note-card {
+    background-color: #F7F8F5;
+    border: 1px solid #E3E7DF;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+/* Верхняя мини-полоска прогресса в футере читалки */
+progressbar.mini-book-progress trough {
+    min-height: 3px;
+    background-color: #E2E6DE;
+}
+
+progressbar.mini-book-progress progress {
+    min-height: 3px;
+    background-color: #435D4E;
+}
+/* Левая промо-панель экранов входа и регистрации */
+.auth-promo-card {
+    background-color: #E5ECE1;
+    border-radius: 20px;
+}
+
+.auth-input {
+    background-color: #FFFFFF;
+    border: 1px solid #DCDED6;
+    border-radius: 10px;
+    padding: 8px 12px;
+}
+
+.auth-primary-btn {
+    background-color: #3F5A4A;
+    color: #FFFFFF;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-weight: bold;
+}
+
+.auth-secondary-btn {
+    background-color: #FAF9F6;
+    border: 1px solid #DCDED6;
+    border-radius: 10px;
+    padding: 10px 16px;
+}
+
+.auth-link-btn {
+    padding: 0 4px;
+    min-height: 0;
+    font-weight: bold;
+}
