@@ -8,3 +8,4 @@ ebook-core = { path = "../core" }
 thiserror.workspace = true
 zip = "2.2"
 roxmltree = "0.20"
+encoding_rs = "0.8"

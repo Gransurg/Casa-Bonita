@@ -4,3 +4,5 @@
 *.db-shm
 *.db-wal
 .DS_Store
+*.fb2
+*.txt

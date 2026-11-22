@@ -1,13 +1,14 @@
 use adw::prelude::*;
+use ebook_parsers::ParsedBook;
 use gtk4::{
-    Box, Button, Label, Orientation, PolicyType, ProgressBar, ScrolledWindow, ToggleButton,
+    Box, Button, Label, Orientation, PolicyType, ProgressBar, ScrolledWindow,
     Widget,
 };
 use std::rc::Rc;
 
-pub fn create_library_view<F>(on_open_book: F) -> Widget
+pub fn create_library_view<F>(books: &[ParsedBook], on_open_book: F) -> Widget
 where
-    F: Fn() + 'static,
+    F: Fn(usize) + 'static,
 {
     let open_book = Rc::new(on_open_book);
 
@@ -22,7 +23,6 @@ where
     content_box.set_margin_top(24);
     content_box.set_margin_bottom(24);
 
-    // Верхний блок: Приветствие и баннер «Сейчас читаете» 
     let welcome_box = Box::new(Orientation::Vertical, 6);
     let title_label = Label::builder()
         .label("Хорошего чтения")
@@ -39,27 +39,37 @@ where
     welcome_box.append(&subtitle_label);
     content_box.append(&welcome_box);
 
-    let banner = create_reading_banner(open_book.clone());
-    content_box.append(&banner);
+    if let Some(first_book) = books.first() {
+        let cb_banner = open_book.clone();
+        let banner = create_reading_banner(first_book, Rc::new(move || {
+            cb_banner(0);
+        }));
+        content_box.append(&banner);
+    } else {
+        let empty_banner = Label::builder()
+            .label("Ваша полка пока пуста. Нажмите «+ Добавить книгу» в сайдбаре.")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["dim-label".to_string()])
+            .margin_top(12)
+            .build();
+        content_box.append(&empty_banner);
+    }
 
-    // Секция «На вашей полке» 
-    let shelf_section = create_shelf_section(open_book);
+    let shelf_section = create_shelf_section(books, open_book);
     content_box.append(&shelf_section);
 
-    // Распорка, чтобы прижать нижнюю строку к низу окна
     let bottom_spacer = Box::new(Orientation::Vertical, 0);
     bottom_spacer.set_vexpand(true);
     content_box.append(&bottom_spacer);
 
-    // Нижняя панель статистики 
-    let footer_box = create_footer_bar();
+    let footer_box = create_footer_bar(books.len());
     content_box.append(&footer_box);
 
     scrolled.set_child(Some(&content_box));
     scrolled.upcast()
 }
 
-fn create_reading_banner(on_open_book: Rc<dyn Fn()>) -> Widget {
+fn create_reading_banner(book: &ParsedBook, on_open_book: Rc<dyn Fn()>) -> Widget {
     let banner_box = Box::new(Orientation::Horizontal, 24);
     banner_box.set_margin_top(4);
     banner_box.set_margin_bottom(4);
@@ -75,11 +85,14 @@ fn create_reading_banner(on_open_book: Rc<dyn Fn()>) -> Widget {
     cover_mock.set_margin_bottom(16);
 
     let cover_label = Label::builder()
-        .label("Маленький\nпринц")
+        .label(&book.title)
+        .wrap(true)
         .justify(gtk4::Justification::Center)
         .halign(gtk4::Align::Center)
         .valign(gtk4::Align::Center)
         .vexpand(true)
+        .margin_start(8)
+        .margin_end(8)
         .build();
     cover_mock.append(&cover_label);
     banner_box.append(&cover_mock);
@@ -95,26 +108,28 @@ fn create_reading_banner(on_open_book: Rc<dyn Fn()>) -> Widget {
         .build();
 
     let book_title = Label::builder()
-        .label("Маленький принц")
+        .label(&book.title)
         .halign(gtk4::Align::Start)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .css_classes(vec!["title-2".to_string()])
         .build();
 
     let author_label = Label::builder()
-        .label("Антуан де Сент-Экзюпери")
+        .label(&book.author)
         .halign(gtk4::Align::Start)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .css_classes(vec!["dim-label".to_string()])
         .build();
 
     let progress_bar = ProgressBar::builder()
-        .fraction(0.08)
+        .fraction(0.0)
         .margin_top(8)
         .margin_end(48)
         .css_classes(vec!["reading-progress".to_string()])
         .build();
 
     let progress_label = Label::builder()
-        .label("Глава II · 8% прочитано")
+        .label(&format!("Глав: {} · Не начато", book.chapters.len()))
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .margin_top(2)
@@ -136,13 +151,12 @@ fn create_reading_banner(on_open_book: Rc<dyn Fn()>) -> Widget {
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
         .build();
 
-    let cb = on_open_book.clone();
     continue_btn.connect_clicked(move |_| {
-        cb();
+        on_open_book();
     });
 
     let hint_label = Label::builder()
-        .label("Ваше место сохранено автоматически")
+        .label("Место сохранено автоматически")
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .margin_top(8)
         .halign(gtk4::Align::End)
@@ -155,7 +169,7 @@ fn create_reading_banner(on_open_book: Rc<dyn Fn()>) -> Widget {
     banner_box.upcast()
 }
 
-fn create_shelf_section(on_open_book: Rc<dyn Fn()>) -> Widget {
+fn create_shelf_section(books: &[ParsedBook], on_open_book: Rc<dyn Fn(usize)>) -> Widget {
     let section_box = Box::new(Orientation::Vertical, 16);
 
     let header_box = Box::new(Orientation::Horizontal, 12);
@@ -168,7 +182,7 @@ fn create_shelf_section(on_open_book: Rc<dyn Fn()>) -> Widget {
         .build();
 
     let count_label = Label::builder()
-        .label("12 книг")
+        .label(&format!("{} книг", books.len()))
         .valign(gtk4::Align::Baseline)
         .css_classes(vec!["dim-label".to_string()])
         .build();
@@ -176,66 +190,38 @@ fn create_shelf_section(on_open_book: Rc<dyn Fn()>) -> Widget {
     let header_spacer = Box::new(Orientation::Horizontal, 0);
     header_spacer.set_hexpand(true);
 
-    let filter_group = Box::new(Orientation::Horizontal, 0);
-    filter_group.add_css_class("linked");
-
-    let sort_date_btn = ToggleButton::builder()
-        .label("По дате")
-        .active(true)
-        .css_classes(vec!["filter-pill".to_string()])
-        .build();
-
-    let sort_title_btn = ToggleButton::builder()
-        .label("По названию")
-        .group(&sort_date_btn)
-        .css_classes(vec!["filter-pill".to_string()])
-        .build();
-
-    filter_group.append(&sort_date_btn);
-    filter_group.append(&sort_title_btn);
-
     header_box.append(&shelf_title);
     header_box.append(&count_label);
     header_box.append(&header_spacer);
-    header_box.append(&filter_group);
     section_box.append(&header_box);
 
     let books_grid = Box::new(Orientation::Horizontal, 18);
 
-    // Активная карточка «Маленький принц»
-    books_grid.append(&create_book_card(
-        "Маленький принц",
-        "Антуан де Сент-Экзюпери",
-        "8% · Глава II",
-        "book-cover-green",
-        Some(on_open_book),
-    ));
-
-    // Остальные пока заглушки без перехода
-    books_grid.append(&create_book_card(
-        "Сиддхартха",
-        "Герман Гессе",
-        "34% · У реки",
-        "book-cover-terracotta",
-        None,
-    ));
-    books_grid.append(&create_book_card(
-        "Письма к молодому поэту",
-        "Р. М. Рильке",
-        "12% · Письмо второе",
-        "book-cover-slate",
-        None,
-    ));
-    books_grid.append(&create_book_card(
-        "Сад расходящихся тропок",
-        "Хорхе Луис Борхес",
-        "Не начато",
-        "book-cover-sand",
-        None,
-    ));
+    if books.is_empty() {
+        let empty_lbl = Label::builder()
+            .label("Пока нет добавленных книг")
+            .css_classes(vec!["dim-label".to_string()])
+            .build();
+        books_grid.append(&empty_lbl);
+    } else {
+        let styles = ["book-cover-green", "book-cover-terracotta", "book-cover-slate", "book-cover-sand"];
+        for (i, book) in books.iter().enumerate() {
+            let style = styles[i % styles.len()];
+            let cb_open = on_open_book.clone();
+            let card = create_book_card(
+                &book.title,
+                &book.author,
+                &format!("Глав: {}", book.chapters.len()),
+                style,
+                Some(Rc::new(move || {
+                    cb_open(i);
+                })),
+            );
+            books_grid.append(&card);
+        }
+    }
 
     section_box.append(&books_grid);
-
     section_box.upcast()
 }
 
@@ -304,7 +290,7 @@ fn create_book_card(
     }
 }
 
-fn create_footer_bar() -> Widget {
+fn create_footer_bar(count: usize) -> Widget {
     let footer_box = Box::new(Orientation::Horizontal, 12);
     footer_box.set_margin_top(12);
 
@@ -316,7 +302,7 @@ fn create_footer_bar() -> Widget {
         .build();
 
     let shown_count = Label::builder()
-        .label("Доступно 6 из 12 книг")
+        .label(&format!("Доступно книг на устройстве: {}", count))
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .build();

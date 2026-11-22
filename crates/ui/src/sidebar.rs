@@ -1,7 +1,14 @@
 use adw::prelude::*;
+use adw::ApplicationWindow;
+use ebook_parsers::{BookParser, Fb2Parser, ParsedBook, TxtParser};
 use gtk4::{Button, Image, Label, ListBox, Orientation, PolicyType, ScrolledWindow, Widget};
+use std::rc::Rc;
 
-pub fn create_sidebar(sidebar_box: &gtk4::Box) -> Widget {
+pub fn create_sidebar(
+    sidebar_box: &gtk4::Box,
+    window: &ApplicationWindow,
+    on_book_added: Rc<dyn Fn(ParsedBook)>,
+) -> Widget {
     sidebar_box.set_size_request(280, -1);
     sidebar_box.add_css_class("sidebar");
 
@@ -13,7 +20,7 @@ pub fn create_sidebar(sidebar_box: &gtk4::Box) -> Widget {
     top_bar.set_margin_bottom(12);
 
     let app_title = Label::builder()
-        .label("Лист") //TODO: Иконку добавить, либо гткшную взять
+        .label("Лист")
         .halign(gtk4::Align::Start)
         .hexpand(true)
         .css_classes(vec!["heading".to_string()])
@@ -77,15 +84,55 @@ pub fn create_sidebar(sidebar_box: &gtk4::Box) -> Widget {
     spacer.set_vexpand(true);
     content_vbox.append(&spacer);
 
-    // Нижний блок: Кнопка, форматы, счетчик
+    // Нижний блок: Кнопка добавления книги через GtkFileDialog
     let add_btn = Button::builder()
         .label("+ Добавить книгу")
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
         .build();
+
+    let window_ref = window.clone();
+    let cb_add = on_book_added;
+    add_btn.connect_clicked(move |_| {
+        let dialog = gtk4::FileDialog::builder()
+            .title("Выберите книгу для импорта")
+            .build();
+
+        let win_clone = window_ref.clone();
+        let cb_inner = cb_add.clone();
+
+        dialog.open(Some(&win_clone), None::<&gtk4::gio::Cancellable>, move |result| {
+            if let Ok(file) = result {
+                if let Some(path) = file.path() {
+                    let txt_parser = TxtParser::new();
+                    let fb2_parser = Fb2Parser::new();
+
+                    let parsed_book = if txt_parser.can_parse(&path) {
+                        txt_parser.parse(&path)
+                    } else if fb2_parser.can_parse(&path) {
+                        fb2_parser.parse(&path)
+                    } else {
+                        eprintln!("Неподдерживаемый формат файла: {}", path.display());
+                        return;
+                    };
+
+                    match parsed_book {
+                        Ok(book) => {
+                            println!("Успешно загружена книга: {} — {}", book.author, book.title);
+                            cb_inner(book);
+                        }
+                        Err(err) => {
+                            eprintln!("Ошибка разбора книги: {err}");
+                        }
+                    }
+                }
+            }
+        });
+    });
+
     content_vbox.append(&add_btn);
 
     let formats_label = Label::builder()
-        .label("EPUB, FB2, MOBI, PDF")
+        .label("EPUB, FB2, TXT")
         .halign(gtk4::Align::Center)
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .build();

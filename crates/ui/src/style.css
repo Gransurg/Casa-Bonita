@@ -90,6 +90,27 @@ progressbar.reading-progress progress {
     border-radius: 6px;
 }
 
+button.chapter-row {
+    color: #2D3F35;
+    background-color: transparent;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 2px;
+    font-size: 0.9em;
+    box-shadow: none;
+}
+
+button.chapter-row:hover {
+    background-color: #E2E6DE;
+}
+
+button.chapter-row:active,
+button.chapter-row:checked {
+    background-color: #E7EFE9;
+    font-weight: bold;
+    color: #365243;
+}
+
 .chapter-row-current {
     background-color: #E7EFE9;
     border-left: 3px solid #435D4E;
@@ -154,4 +175,36 @@ progressbar.mini-book-progress progress {
     padding: 0 4px;
     min-height: 0;
     font-weight: bold;
+}
+
+/* Явный цвет текста для названий глав в оглавлении */
+label.chapter-title-label {
+    color: #2D3F35;
+    font-size: 0.95em;
+}
+
+button.chapter-row:hover label.chapter-title-label {
+    color: #1A261F;
+}
+
+button.chapter-row:active label.chapter-title-label,
+button.chapter-row:checked label.chapter-title-label {
+    color: #365243;
+    font-weight: bold;
+}
+/* Интерактивные строки оглавления */
+.chapter-row-box {
+    border-radius: 6px;
+    background-color: transparent;
+    transition: background-color 200ms ease;
+}
+
+.chapter-row-box:hover {
+    background-color: #E2E6DE;
+}
+
+/* Гарантированный цвет текста названий глав */
+label.chapter-title-text {
+    color: #2D3F35;
+    font-size: 0.95em;
 }
