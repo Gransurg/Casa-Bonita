@@ -69,7 +69,7 @@ fn build_ui(app: &Application) {
     );
     main_area.append(&header_bar);
 
-    // Состояние загруженных книг в памяти (позже перенесем в ebook-db)
+    // Состояние загруженных книг в памяти (опять же, заглушка до БД)
     let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Функция перерисовки библиотеки

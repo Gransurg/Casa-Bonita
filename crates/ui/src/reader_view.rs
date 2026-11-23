@@ -17,7 +17,7 @@ struct TocRow {
     row_box: Box,
     title_lbl: Label,
 }
-
+// TODO: Подумать, стоит ли перекинуть пагинацию в отдельный файл 
 fn paginate_chapter_content(content: &str) -> Vec<Vec<String>> {
     let paragraphs: Vec<String> = content
         .split('\n')
@@ -253,13 +253,13 @@ where
             );
         });
     }
-
+    // Временная мера до интеграции с БД
     let chapters_ref: Rc<Vec<ebook_parsers::ParsedChapter>> = Rc::new(book.chapters.clone());
     let current_pages: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
     let loaded_chapter_idx: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
     let highlight_chapter_slot: Rc<RefCell<Option<Rc<dyn Fn(usize)>>>> =
         Rc::new(RefCell::new(None));
-
+    // TODO: Добавить комменты 
     let render_current_page = {
         let ch_idx_ref = current_chapter_idx.clone();
         let pg_idx_ref = current_page_idx.clone();
@@ -439,7 +439,7 @@ where
     root.append(&text_container);
     root.upcast()
 }
-
+// TODO: Перекинуть логику сайдбара окна чтения в отдельный файл
 fn build_toc_tab(
     book: &ParsedBook,
     on_chapter_selected: Rc<dyn Fn(usize)>,
