@@ -10,6 +10,13 @@ use std::time::Duration;
 
 const PARAGRAPHS_PER_PAGE: usize = 40;
 const SCROLL_IDLE_HIDE_MS: u64 = 250;
+const SIDEBAR_TRANSITION_MS: u64 = 220;
+const READER_SIDEBAR_WIDTH: i32 = 195;
+
+struct TocRow {
+    row_box: Box,
+    title_lbl: Label,
+}
 
 fn paginate_chapter_content(content: &str) -> Vec<Vec<String>> {
     let paragraphs: Vec<String> = content
@@ -41,9 +48,9 @@ where
     let current_page_idx = Rc::new(RefCell::new(0_usize));
     let total_chapters = book.chapters.len();
 
-    // --- Сайдбар читалки (Оглавление / Заметки) ---
+    // Cайдбар читалки (Оглавление / Заметки)
     let sidebar = Box::new(Orientation::Vertical, 0);
-    sidebar.set_size_request(240, -1);
+    sidebar.set_size_request(READER_SIDEBAR_WIDTH, -1);
     sidebar.add_css_class("sidebar");
 
     let tabs_bar = Box::new(Orientation::Horizontal, 0);
@@ -71,20 +78,20 @@ where
 
     let toc_revealer = Revealer::builder()
         .transition_type(RevealerTransitionType::SlideRight)
-        .transition_duration(250)
+        .transition_duration(SIDEBAR_TRANSITION_MS as u32)
         .child(&sidebar)
         .reveal_child(true)
         .build();
 
-    // --- Центральная область текста ---
+    // Центральная область текста 
     let text_container = Box::new(Orientation::Vertical, 0);
     text_container.set_hexpand(true);
     text_container.set_vexpand(true);
 
     let top_bar = Box::new(Orientation::Horizontal, 12);
-    top_bar.set_margin_start(24);
-    top_bar.set_margin_end(24);
-    top_bar.set_margin_top(16);
+    top_bar.set_margin_start(20);
+    top_bar.set_margin_end(20);
+    top_bar.set_margin_top(14);
     top_bar.set_margin_bottom(8);
 
     let back_btn = Button::builder()
@@ -98,17 +105,32 @@ where
         cb_back();
     });
 
-    let toggle_toc_btn = Button::builder()
-        .icon_name("view-list-symbolic")
-        .tooltip_text("Скрыть / показать оглавление")
+    // Кнопка открытия/закрытия сайдбара читалки
+    let toggle_sidebar_btn = Button::builder()
+        .icon_name("sidebar-show-symbolic")
+        .tooltip_text("Скрыть / открыть боковую панель")
         .css_classes(vec!["flat".to_string()])
         .valign(gtk4::Align::Center)
         .build();
 
     let rev_clone = toc_revealer.clone();
-    toggle_toc_btn.connect_clicked(move |_| {
-        let is_revealed = rev_clone.reveals_child();
-        rev_clone.set_reveal_child(!is_revealed);
+    toggle_sidebar_btn.connect_clicked(move |_| {
+        let next_open = !rev_clone.reveals_child();
+        if next_open {
+            rev_clone.set_visible(true);
+            rev_clone.set_reveal_child(true);
+        } else {
+            rev_clone.set_reveal_child(false);
+            let rev_hide = rev_clone.clone();
+            glib::timeout_add_local_once(
+                Duration::from_millis(SIDEBAR_TRANSITION_MS),
+                move || {
+                    if !rev_hide.reveals_child() {
+                        rev_hide.set_visible(false);
+                    }
+                },
+            );
+        }
     });
 
     let page_header = Box::new(Orientation::Vertical, 2);
@@ -118,35 +140,34 @@ where
     let title_lbl = Label::builder()
         .label(&book.title)
         .halign(gtk4::Align::Center)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .css_classes(vec!["title-3".to_string()])
         .build();
 
     let author_lbl = Label::builder()
         .label(&book.author)
         .halign(gtk4::Align::Center)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .build();
 
     page_header.append(&title_lbl);
     page_header.append(&author_lbl);
 
-    let right_balance = Box::new(Orientation::Horizontal, 0);
-    right_balance.set_size_request(130, -1);
-
     top_bar.append(&back_btn);
-    top_bar.append(&toggle_toc_btn);
+    top_bar.append(&toggle_sidebar_btn);
     top_bar.append(&page_header);
-    top_bar.append(&right_balance);
     text_container.append(&top_bar);
 
     let text_scroll = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .vexpand(true)
+        .hexpand(true)
         .build();
 
     let text_box = Box::new(Orientation::Vertical, 10);
-    text_box.set_margin_start(64);
-    text_box.set_margin_end(64);
+    text_box.set_margin_start(24);
+    text_box.set_margin_end(24);
     text_box.set_margin_top(16);
     text_box.set_margin_bottom(24);
     text_box.set_halign(gtk4::Align::Center);
@@ -165,7 +186,7 @@ where
     text_scroll.set_child(Some(&text_box));
     text_container.append(&text_scroll);
 
-    // --- Нижняя панель навигации по страницам текущей главы ---
+    // Нижняя панель навигации по страницам текущей главы 
     let nav_bar = Box::new(Orientation::Horizontal, 16);
     nav_bar.set_margin_start(24);
     nav_bar.set_margin_end(24);
@@ -236,6 +257,8 @@ where
     let chapters_ref: Rc<Vec<ebook_parsers::ParsedChapter>> = Rc::new(book.chapters.clone());
     let current_pages: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
     let loaded_chapter_idx: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
+    let highlight_chapter_slot: Rc<RefCell<Option<Rc<dyn Fn(usize)>>>> =
+        Rc::new(RefCell::new(None));
 
     let render_current_page = {
         let ch_idx_ref = current_chapter_idx.clone();
@@ -251,6 +274,7 @@ where
         let scroll_ref = text_scroll.clone();
         let nav_rev = nav_revealer.clone();
         let suppress = suppress_scroll_hide.clone();
+        let hl_slot = highlight_chapter_slot.clone();
 
         Rc::new(move || {
             let ch_idx = *ch_idx_ref.borrow();
@@ -265,6 +289,10 @@ where
                 let paginated = paginate_chapter_content(content);
                 *pages_ref.borrow_mut() = paginated;
                 *loaded_ch_ref.borrow_mut() = Some(ch_idx);
+            }
+
+            if let Some(hl) = hl_slot.borrow().as_ref() {
+                hl(ch_idx);
             }
 
             let pages = pages_ref.borrow();
@@ -322,7 +350,7 @@ where
         })
     };
 
-    // Листаем только страницы внутри выбранной главы
+    // Листаем только страницы внутри текущей главы
     {
         let pg_idx_ref = current_page_idx.clone();
         let render_cb = render_current_page.clone();
@@ -362,13 +390,14 @@ where
         })
     };
 
-    // Первоначальный рендер первой страницы первой главы
-    render_current_page();
-
-    // Вкладки оглавления и заметок
-    let toc_widget = build_toc_tab(book, on_chapter_selected);
+    let (toc_widget, highlight_chapter) = build_toc_tab(book, on_chapter_selected);
     stack.add_named(&toc_widget, Some("toc"));
     stack.add_named(&build_notes_tab(), Some("notes"));
+
+    *highlight_chapter_slot.borrow_mut() = Some(highlight_chapter.clone());
+
+    // Первоначальный рендер первой страницы первой главы и подсветка активной главы
+    render_current_page();
 
     let stack_for_toc = stack.clone();
     tab_toc.connect_toggled(move |btn| {
@@ -387,8 +416,8 @@ where
     sidebar.append(&stack);
 
     let sidebar_bottom = Box::new(Orientation::Vertical, 4);
-    sidebar_bottom.set_margin_start(14);
-    sidebar_bottom.set_margin_end(14);
+    sidebar_bottom.set_margin_start(12);
+    sidebar_bottom.set_margin_end(12);
     sidebar_bottom.set_margin_top(8);
     sidebar_bottom.set_margin_bottom(14);
 
@@ -414,7 +443,7 @@ where
 fn build_toc_tab(
     book: &ParsedBook,
     on_chapter_selected: Rc<dyn Fn(usize)>,
-) -> Widget {
+) -> (Widget, Rc<dyn Fn(usize)>) {
     let scroll = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .vexpand(true)
@@ -425,6 +454,8 @@ fn build_toc_tab(
     list.set_margin_end(8);
     list.set_margin_top(10);
     list.set_margin_bottom(10);
+
+    let mut rows = Vec::with_capacity(book.chapters.len());
 
     for (i, chapter) in book.chapters.iter().enumerate() {
         let row_box = Box::new(Orientation::Horizontal, 8);
@@ -453,10 +484,29 @@ fn build_toc_tab(
 
         row_box.add_controller(click_controller);
         list.append(&row_box);
+
+        rows.push(TocRow { row_box, title_lbl });
     }
 
     scroll.set_child(Some(&list));
-    scroll.upcast()
+
+    let rows_rc = Rc::new(rows);
+    let highlight_chapter: Rc<dyn Fn(usize)> = {
+        let rows_ref = rows_rc.clone();
+        Rc::new(move |active_idx: usize| {
+            for (idx, item) in rows_ref.iter().enumerate() {
+                if idx == active_idx {
+                    item.row_box.add_css_class("active-chapter");
+                    item.title_lbl.add_css_class("heading");
+                } else {
+                    item.row_box.remove_css_class("active-chapter");
+                    item.title_lbl.remove_css_class("heading");
+                }
+            }
+        })
+    };
+
+    (scroll.upcast(), highlight_chapter)
 }
 
 fn build_notes_tab() -> Widget {

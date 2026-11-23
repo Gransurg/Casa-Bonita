@@ -199,6 +199,11 @@ button.chapter-row:checked label.chapter-title-label {
     transition: background-color 200ms ease;
 }
 
+.chapter-row-box.active-chapter {
+    background-color: alpha(@accent_bg_color, 0.18);
+    border-radius: 8px;
+}
+
 .chapter-row-box:hover {
     background-color: #E2E6DE;
 }
