@@ -9,7 +9,7 @@ pub fn create_sidebar(
     window: &ApplicationWindow,
     on_book_added: Rc<dyn Fn(ParsedBook)>,
 ) -> Widget {
-    sidebar_box.set_size_request(280, -1);
+    sidebar_box.set_size_request(180, -1);
     sidebar_box.add_css_class("sidebar");
 
     // Верхняя панель сайдбара (название и кнопка скрытия)

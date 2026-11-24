@@ -3,6 +3,9 @@ mod reader_view;
 mod register_view;
 mod sidebar;
 mod views;
+mod pagination;
+mod reader_nav;
+mod reader_sidebar;
 
 use adw::prelude::*;
 use adw::{Application, ApplicationWindow, HeaderBar};
