@@ -11,3 +11,7 @@ anyhow.workspace = true
 gtk4 = { version = "0.9", features = ["v4_14"] }
 glib = "0.9"
 adw = { version = "0.7", package = "libadwaita" }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4" }
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+

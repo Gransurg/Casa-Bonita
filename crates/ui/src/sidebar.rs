@@ -7,7 +7,7 @@ use std::rc::Rc;
 pub fn create_sidebar(
     sidebar_box: &gtk4::Box,
     window: &ApplicationWindow,
-    on_book_added: Rc<dyn Fn(ParsedBook)>,
+    on_book_added: Rc<dyn Fn((ParsedBook, std::path::PathBuf))>,
 ) -> Widget {
     sidebar_box.set_size_request(180, -1);
     sidebar_box.add_css_class("sidebar");
@@ -84,7 +84,7 @@ pub fn create_sidebar(
     spacer.set_vexpand(true);
     content_vbox.append(&spacer);
 
-    // Нижний блок: Кнопка добавления книги через GtkFileDialog
+    // Кнопка добавления книги через
     let add_btn = Button::builder()
         .label("+ Добавить книгу")
         .css_classes(vec!["suggested-action".to_string(), "pill".to_string()])
@@ -118,7 +118,7 @@ pub fn create_sidebar(
                     match parsed_book {
                         Ok(book) => {
                             println!("Успешно загружена книга: {} — {}", book.author, book.title);
-                            cb_inner(book);
+                            cb_inner((book, path));
                         }
                         Err(err) => {
                             eprintln!("Ошибка разбора книги: {err}");

@@ -1,15 +1,14 @@
 mod auth_view;
-mod reader_view;
 mod register_view;
 mod sidebar;
 mod views;
 mod pagination;
-mod reader_nav;
-mod reader_sidebar;
-
+pub mod reader_zone;
+pub use repositories::progress_repo::ProgressRepository;
 use adw::prelude::*;
 use adw::{Application, ApplicationWindow, HeaderBar};
 use auth_view::create_auth_view;
+use ebook_parsers::BookParser;
 use gtk4::gdk::Display;
 use gtk4::{Button, CssProvider, Image, Orientation, Stack, Widget};
 use register_view::create_register_view;
@@ -54,11 +53,21 @@ fn build_ui(app: &Application) {
 
     let root_box = gtk4::Box::new(Orientation::Horizontal, 0);
 
-    // Сайдбар библиотеки
+    let db_path = std::path::Path::new("list.db");
+    let db_conn = match ebook_db::init_database(db_path) {
+        Ok(conn) => {
+            println!("База данных успешно инициализирована: {}", db_path.display());
+            Rc::new(RefCell::new(conn))
+        }
+        Err(err) => {
+            eprintln!("Ошибка инициализации базы данных: {err}");
+            std::process::exit(1);
+        }
+    };
+
     let sidebar_container = gtk4::Box::new(Orientation::Vertical, 0);
     root_box.append(&sidebar_container);
 
-    // Основная рабочая область
     let main_area = gtk4::Box::new(Orientation::Vertical, 0);
     main_area.set_hexpand(true);
 
@@ -72,17 +81,43 @@ fn build_ui(app: &Application) {
     );
     main_area.append(&header_bar);
 
-    // Состояние загруженных книг в памяти (опять же, заглушка до БД)
-    let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
+    let conn_for_books = db_conn.clone();
+    let load_books_from_db = move || -> Vec<(i64, ebook_parsers::ParsedBook)> {
+        let conn = conn_for_books.borrow();
+        match ebook_db::BookRepository::get_all_books(&conn) {
+            Ok(book_models) => {
+                let mut parsed_books = Vec::new();
+                for m in book_models {
+                    let book_id = m.id.parse::<i64>().unwrap_or(0);
+                    let parser = ebook_parsers::Fb2Parser::new();
+                    if let Ok(parsed) = parser.parse(&m.file_path) {
+                        parsed_books.push((book_id, parsed));
+                    } else {
+                        let txt_parser = ebook_parsers::TxtParser::new();
+                        if let Ok(parsed) = txt_parser.parse(&m.file_path) {
+                            parsed_books.push((book_id, parsed));
+                        }
+                    }
+                }
+                parsed_books
+            }
+            Err(err) => {
+                eprintln!("Ошибка загрузки книг из базы: {err}");
+                Vec::new()
+            }
+        }
+    };
 
-    // Функция перерисовки библиотеки
+    let books: Rc<RefCell<Vec<(i64, ebook_parsers::ParsedBook)>>> = Rc::new(RefCell::new(load_books_from_db()));
+
     let refresh_library: Rc<dyn Fn(Rc<dyn Fn(usize)>)> = {
         let stack_ref = views_stack.clone();
         let books_ref = books.clone();
 
         Rc::new(move |on_open_book_cb: Rc<dyn Fn(usize)>| {
             let b_list = books_ref.borrow();
-            let library_view = create_library_view(&b_list, move |idx| {
+            let parsed_only: Vec<ebook_parsers::ParsedBook> = b_list.iter().map(|(_, b)| b.clone()).collect();
+            let library_view = create_library_view(&parsed_only, move |idx| {
                 on_open_book_cb(idx);
             });
 
@@ -95,7 +130,6 @@ fn build_ui(app: &Application) {
         })
     };
 
-    // Обработчик открытия конкретной книги по её индексу
     let open_book_handler: Rc<RefCell<Option<Rc<dyn Fn(usize)>>>> = Rc::new(RefCell::new(None));
     {
         let stack_for_reader = views_stack.clone();
@@ -103,15 +137,17 @@ fn build_ui(app: &Application) {
         let books_for_reader = books.clone();
         let refresh_for_back = refresh_library.clone();
         let handler_weak = Rc::downgrade(&open_book_handler);
+        let db_conn_for_open = db_conn.clone();
 
         *open_book_handler.borrow_mut() = Some(Rc::new(move |book_index: usize| {
             let b_list = books_for_reader.borrow();
-            if let Some(book) = b_list.get(book_index) {
+            if let Some((book_id, book)) = b_list.get(book_index) {
                 let sidebar_b = sidebar_for_reader.clone();
                 let ref_back = refresh_for_back.clone();
                 let handler_weak_inner = handler_weak.clone();
+                let db_conn_reader = db_conn_for_open.clone();
 
-                let reader = reader_view::create_reader_view(book, move || {
+                let reader = reader_zone::create_reader_view(book, *book_id, db_conn_reader, move || {
                     sidebar_b.set_visible(true);
                     if let Some(handler_rc) = handler_weak_inner.upgrade() {
                         if let Some(cb) = handler_rc.borrow().as_ref() {
@@ -136,26 +172,43 @@ fn build_ui(app: &Application) {
         move || handler_ref.borrow().as_ref().unwrap().clone()
     };
 
-    // Первоначальная отрисовка библиотеки
     refresh_library(get_open_cb());
 
-    // Колбэк при импорте книги через диалог в сайдбаре
     let books_for_add = books.clone();
+    let conn_for_add = db_conn.clone();
     let refresh_for_add = refresh_library.clone();
     let get_open_for_add = get_open_cb.clone();
-    let on_book_added = Rc::new(move |book: ebook_parsers::ParsedBook| {
+    let on_book_added = Rc::new(move |(book, file_path): (ebook_parsers::ParsedBook, std::path::PathBuf)| {
         println!(
             "Добавлена книга: {} (глав: {})",
             book.title,
             book.chapters.len()
         );
-        books_for_add.borrow_mut().push(book);
+
+        let book_uuid = uuid::Uuid::new_v4().to_string();
+        let new_book_model = ebook_core::Book::new(
+            book_uuid,
+            book.title.clone(),
+            book.author.clone(),
+            book.format,
+            file_path,
+            chrono::Utc::now().timestamp(),
+        );
+
+        let conn = conn_for_add.borrow();
+        let mut inserted_id = 0_i64;
+        if let Err(err) = ebook_db::BookRepository::insert_book(&conn, &new_book_model) {
+            eprintln!("Не удалось сохранить книгу в базу данных: {err}");
+        } else {
+            inserted_id = conn.last_insert_rowid();
+        }
+
+        books_for_add.borrow_mut().push((inserted_id, book));
         refresh_for_add(get_open_for_add());
     });
 
     sidebar::create_sidebar(&sidebar_container, &window, on_book_added);
 
-    // Экран авторизации
     let stack_for_reg = views_stack.clone();
     let sidebar_for_guest_auth = sidebar_container.clone();
     let refresh_for_guest_auth = refresh_library.clone();
@@ -171,7 +224,6 @@ fn build_ui(app: &Application) {
     );
     views_stack.add_named(&auth, Some("auth"));
 
-    // Экран регистрации
     let stack_for_login = views_stack.clone();
     let sidebar_for_guest_reg = sidebar_container.clone();
     let refresh_for_guest_reg = refresh_library.clone();
@@ -214,7 +266,6 @@ fn create_header_bar(
     });
     header_bar.pack_start(&toggle_sidebar_btn);
 
-    // Иконка аккаунта по центру сверху
     let account_btn = Button::builder()
         .tooltip_text("Аккаунт")
         .css_classes(vec!["flat".to_string(), "circular".to_string()])
