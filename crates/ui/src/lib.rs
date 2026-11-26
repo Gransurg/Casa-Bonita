@@ -108,17 +108,33 @@ fn build_ui(app: &Application) {
     };
 
     let books: Rc<RefCell<Vec<(i64, ebook_parsers::ParsedBook)>>> = Rc::new(RefCell::new(load_books_from_db()));
-    // Состояние загруженных книг в памяти (опять же, заглушка до БД)
+
     // let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
 
     let refresh_library: Rc<dyn Fn(Rc<dyn Fn(usize)>)> = {
         let stack_ref = views_stack.clone();
         let books_ref = books.clone();
+        let db_conn_for_views = db_conn.clone(); 
 
         Rc::new(move |on_open_book_cb: Rc<dyn Fn(usize)>| {
             let b_list = books_ref.borrow();
             let parsed_only: Vec<ebook_parsers::ParsedBook> = b_list.iter().map(|(_, b)| b.clone()).collect();
-            let library_view = create_library_view(&parsed_only, move |idx| {
+            
+            let mut first_progress = None;
+            if let Some((book_id, book)) = b_list.first() {
+                let conn = db_conn_for_views.borrow();
+                if let Ok(Some((last_pos, percentage, _))) = ebook_db::ProgressRepository::get_progress(&conn, *book_id) {
+                    let parts: Vec<&str> = last_pos.split(':').collect();
+                    let chapter_idx = if parts.len() == 2 {
+                        parts[0].parse::<usize>().unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    first_progress = Some((percentage, chapter_idx as i32));
+                }
+            }
+
+            let library_view = create_library_view(&parsed_only, first_progress, move |idx| {
                 on_open_book_cb(idx);
             });
 

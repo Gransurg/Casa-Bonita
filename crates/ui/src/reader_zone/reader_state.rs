@@ -44,8 +44,12 @@ impl ReaderState {
         let ch = *self.current_chapter_idx.borrow();
         let pg = *self.current_page_idx.borrow();
         let pos_str = format!("{}:{}", ch, pg);
+        
+        let total_ch = self.total_chapters.max(1);
         let pages_len = total_pages.max(1);
-        let percentage = ((pg as f64 + 1.0) / (pages_len as f64)) * 100.0;
+        let chapter_fraction = ch as f64 / total_ch as f64;
+        let page_fraction = ((pg as f64 + 1.0) / (pages_len as f64)) / total_ch as f64;
+        let percentage = ((chapter_fraction + page_fraction) * 100.0).clamp(0.0, 100.0);
 
         let conn = self.db_conn.borrow();
         let _ = ebook_db::ProgressRepository::save_progress(
@@ -53,7 +57,7 @@ impl ReaderState {
             self.book_id,
             &pos_str,
             percentage,
-            0,
+            ch as i64,
         );
     }
 }

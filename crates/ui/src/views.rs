@@ -6,7 +6,11 @@ use gtk4::{
 };
 use std::rc::Rc;
 
-pub fn create_library_view<F>(books: &[ParsedBook], on_open_book: F) -> Widget
+pub fn create_library_view<F>(
+    books: &[ParsedBook],
+    first_book_progress: Option<(f64, i32)>,
+    on_open_book: F,
+) -> Widget
 where
     F: Fn(usize) + 'static,
 {
@@ -41,7 +45,7 @@ where
 
     if let Some(first_book) = books.first() {
         let cb_banner = open_book.clone();
-        let banner = create_reading_banner(first_book, Rc::new(move || {
+        let banner = create_reading_banner(first_book, first_book_progress, Rc::new(move || {
             cb_banner(0);
         }));
         content_box.append(&banner);
@@ -69,7 +73,11 @@ where
     scrolled.upcast()
 }
 
-fn create_reading_banner(book: &ParsedBook, on_open_book: Rc<dyn Fn()>) -> Widget {
+fn create_reading_banner(
+    book: &ParsedBook,
+    progress_opt: Option<(f64, i32)>,
+    on_open_book: Rc<dyn Fn()>,
+) -> Widget {
     let banner_box = Box::new(Orientation::Horizontal, 24);
     banner_box.set_margin_top(4);
     banner_box.set_margin_bottom(4);
@@ -121,15 +129,28 @@ fn create_reading_banner(book: &ParsedBook, on_open_book: Rc<dyn Fn()>) -> Widge
         .css_classes(vec!["dim-label".to_string()])
         .build();
 
+    let (percentage_fraction, progress_text) = if let Some((perc, ch)) = progress_opt {
+        let display_ch = (ch as usize + 1).min(book.chapters.len());
+        (
+            perc / 100.0,
+            format!("Глава {} из {} · {:.1}%", display_ch, book.chapters.len(), perc),
+        )
+    } else {
+        (
+            0.0,
+            format!("Глав: {} · Не начато", book.chapters.len()),
+        )
+    };
+
     let progress_bar = ProgressBar::builder()
-        .fraction(0.0)
+        .fraction(percentage_fraction)
         .margin_top(8)
         .margin_end(48)
         .css_classes(vec!["reading-progress".to_string()])
         .build();
 
     let progress_label = Label::builder()
-        .label(&format!("Глав: {} · Не начато", book.chapters.len()))
+        .label(&progress_text)
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption".to_string(), "dim-label".to_string()])
         .margin_top(2)
