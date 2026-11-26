@@ -4,7 +4,6 @@ mod sidebar;
 mod views;
 mod pagination;
 pub mod reader_zone;
-pub use repositories::progress_repo::ProgressRepository;
 use adw::prelude::*;
 use adw::{Application, ApplicationWindow, HeaderBar};
 use auth_view::create_auth_view;
@@ -81,7 +80,6 @@ fn build_ui(app: &Application) {
     );
     main_area.append(&header_bar);
 
-<<<<<<< HEAD
     let conn_for_books = db_conn.clone();
     let load_books_from_db = move || -> Vec<(i64, ebook_parsers::ParsedBook)> {
         let conn = conn_for_books.borrow();
@@ -110,10 +108,8 @@ fn build_ui(app: &Application) {
     };
 
     let books: Rc<RefCell<Vec<(i64, ebook_parsers::ParsedBook)>>> = Rc::new(RefCell::new(load_books_from_db()));
-=======
     // Состояние загруженных книг в памяти (опять же, заглушка до БД)
-    let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
->>>>>>> 736fe42 (Добавил TODO в некоторые файлы)
+    // let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
 
     let refresh_library: Rc<dyn Fn(Rc<dyn Fn(usize)>)> = {
         let stack_ref = views_stack.clone();

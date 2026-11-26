@@ -3,6 +3,7 @@ use std::path::Path;
 
 pub mod repositories;
 pub use repositories::BookRepository;
+pub use repositories::progress_repo::ProgressRepository;
 
 mod embedded {
     use refinery::embed_migrations;
