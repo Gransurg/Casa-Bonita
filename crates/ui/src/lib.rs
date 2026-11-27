@@ -95,23 +95,21 @@ fn build_ui(app: &Application) {
             Ok(book_models) => {
                 let mut parsed_books = Vec::new();
                 for m in book_models {
-                    // Запрашиваем реальный числовой id книги из SQLite по ее пути, пущто UUID это
-                    // не числовой айди из бд
-                let file_path_str = m.file_path.to_string_lossy();
-                let book_id: i64 = match conn.query_row(
-                    "SELECT id FROM books WHERE file_path = ?1",
-                    rusqlite::params![file_path_str.as_ref()],
-                    |row| row.get(0),
-                ) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        eprintln!(
-                            "Не удалось получить id книги по пути {}: {err}",
-                            m.file_path.display()
-                        );
-                        continue; // пропускаем книгу без валидного id
-                    }
-                };
+                    let file_path_str = m.file_path.to_string_lossy();
+                    let book_id: i64 = match conn.query_row(
+                        "SELECT id FROM books WHERE file_path = ?1",
+                        rusqlite::params![file_path_str.as_ref()],
+                        |row| row.get(0),
+                    ) {
+                        Ok(id) => id,
+                        Err(err) => {
+                            eprintln!(
+                                "Не удалось получить id книги по пути {}: {err}",
+                                m.file_path.display()
+                            );
+                            continue;
+                        }
+                    };
 
                     let parser = ebook_parsers::Fb2Parser::new();
                     if let Ok(parsed) = parser.parse(&m.file_path) {
@@ -134,62 +132,112 @@ fn build_ui(app: &Application) {
 
     let books: Rc<RefCell<Vec<(i64, ebook_parsers::ParsedBook)>>> = Rc::new(RefCell::new(load_books_from_db()));
 
-    // let books: Rc<RefCell<Vec<ebook_parsers::ParsedBook>>> = Rc::new(RefCell::new(Vec::new()));
+    let refresh_library: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
 
-    let refresh_library: Rc<dyn Fn(Rc<dyn Fn(usize)>)> = {
+    let db_conn_for_del = db_conn.clone();
+    let books_for_del = books.clone();
+    let window_for_del = window.clone();
+
+    let open_book_handler: Rc<RefCell<Option<Rc<dyn Fn(usize)>>>> = Rc::new(RefCell::new(None));
+    let get_open_cb = {
+        let handler_ref = open_book_handler.clone();
+        move || handler_ref.borrow().as_ref().unwrap().clone()
+    };
+
+    // Клонируем Rc заранее, чтобы избежать перемещения оригинального refresh_library в замыкание
+    let refresh_library_for_del = refresh_library.clone();
+
+    let on_delete_book = move |book_id: i64| {
+        let window_ref = window_for_del.clone();
+        let db_conn_ref = db_conn_for_del.clone();
+        let books_ref = books_for_del.clone();
+        let refresh_cell = refresh_library_for_del.clone();
+
+        let dialog = gtk4::MessageDialog::new(
+            Some(&window_ref),
+            gtk4::DialogFlags::MODAL,
+            gtk4::MessageType::Warning,
+            gtk4::ButtonsType::OkCancel,
+            "Удалить книгу?",
+        );
+        dialog.set_secondary_text(Some(
+            "Вы действительно хотите удалить эту книгу из библиотеки? Прогресс чтения также будет удален.",
+        ));
+
+        dialog.connect_response(move |dlg, response| {
+            if response == gtk4::ResponseType::Ok {
+                let conn = db_conn_ref.borrow();
+                let _ = conn.execute("DELETE FROM books WHERE id = ?1", rusqlite::params![book_id]);
+                let _ = conn.execute("DELETE FROM reading_progress WHERE book_id = ?1", rusqlite::params![book_id]);
+                drop(conn);
+
+                books_ref.borrow_mut().retain(|(id, _)| *id != book_id);
+                
+                if let Some(refresh_fn) = refresh_cell.borrow().as_ref() {
+                    refresh_fn();
+                }
+            }
+            dlg.close();
+        });
+
+        dialog.show();
+    };
+
+    let refresh_library_fn = {
         let stack_ref = views_stack.clone();
         let books_ref = books.clone();
         let db_conn_for_views = db_conn.clone();
+        let del_cb = on_delete_book.clone();
 
         Rc::new(move |on_open_book_cb: Rc<dyn Fn(usize)>| {
             let b_list = books_ref.borrow();
-            let parsed_only: Vec<ebook_parsers::ParsedBook> = b_list.iter().map(|(_, b)| b.clone()).collect();
 
-        let mut active_idx: Option<usize> = None;
-        let mut active_progress = None;
+            let mut active_idx: Option<usize> = None;
+            let mut active_progress = None;
 
-        {
-            let conn = db_conn_for_views.borrow();
+            {
+                let conn = db_conn_for_views.borrow();
+                let mut stmt = match conn
+                    .prepare("SELECT book_id FROM reading_progress ORDER BY last_read_at DESC") {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
 
-            let mut stmt = conn
-                .prepare(
-                    "SELECT book_id FROM reading_progress ORDER BY last_read_at DESC",
-                )
-                .unwrap();
+                let ids_iter = stmt.query_map([], |row| row.get::<_, i64>(0)).unwrap();
 
-            let ids_iter = stmt
-                .query_map([], |row| row.get::<_, i64>(0))
-                .unwrap();
+                for id_res in ids_iter {
+                    let Ok(b_id) = id_res else { continue };
+                    if let Some(pos) = b_list.iter().position(|(id, _)| *id == b_id) {
+                        active_idx = Some(pos);
 
-            for id_res in ids_iter {
-                let Ok(b_id) = id_res else { continue };
-                if let Some(pos) = b_list.iter().position(|(id, _)| *id == b_id) {
-                    active_idx = Some(pos);
-
-                    if let Ok(Some((last_pos, percentage, _))) =
-                        ebook_db::ProgressRepository::get_progress(&conn, b_id)
-                    {
-                        let parts: Vec<&str> = last_pos.split(':').collect();
-                        let chapter_idx = if parts.len() == 2 {
-                            parts[0].parse::<usize>().unwrap_or(0)
-                        } else {
-                            0
-                        };
-                        active_progress = Some((percentage, chapter_idx as i32));
+                        if let Ok(Some((last_pos, percentage, _))) =
+                            ebook_db::ProgressRepository::get_progress(&conn, b_id)
+                        {
+                            let parts: Vec<&str> = last_pos.split(':').collect();
+                            let chapter_idx = if parts.len() == 2 {
+                                parts[0].parse::<usize>().unwrap_or(0)
+                            } else {
+                                0
+                            };
+                            active_progress = Some((percentage, chapter_idx as i32));
+                        }
+                        break;
+                    }
+                }
             }
-            break; // нашли самую свежую из присутствующих — дальше не идём
-        }
-    }
-}
 
-let active_idx = active_idx.unwrap_or(0);
+            let active_idx = active_idx.unwrap_or(0);
+            let del_cb_inner = del_cb.clone();
 
             let library_view = create_library_view(
-                &parsed_only,
+                &b_list,
                 active_progress,
                 active_idx, 
                 move |idx| {
                     on_open_book_cb(idx);
+                },
+                move |id| {
+                    del_cb_inner(id);
                 },
             );
 
@@ -202,12 +250,19 @@ let active_idx = active_idx.unwrap_or(0);
         })
     };
 
-    let open_book_handler: Rc<RefCell<Option<Rc<dyn Fn(usize)>>>> = Rc::new(RefCell::new(None));
+    *refresh_library.borrow_mut() = {
+        let ref_for_cell = refresh_library_fn.clone();
+        let get_cb_for_cell = get_open_cb.clone();
+        Some(Rc::new(move || {
+            ref_for_cell(get_cb_for_cell());
+        }))
+    };
+
     {
         let stack_for_reader = views_stack.clone();
         let sidebar_for_reader = sidebar_container.clone();
         let books_for_reader = books.clone();
-        let refresh_for_back = refresh_library.clone();
+        let ref_cell_for_reader = refresh_library.clone();
         let handler_weak = Rc::downgrade(&open_book_handler);
         let db_conn_for_open = db_conn.clone();
 
@@ -215,16 +270,14 @@ let active_idx = active_idx.unwrap_or(0);
             let b_list = books_for_reader.borrow();
             if let Some((book_id, book)) = b_list.get(book_index) {
                 let sidebar_b = sidebar_for_reader.clone();
-                let ref_back = refresh_for_back.clone();
+                let ref_cell_inner = ref_cell_for_reader.clone();
                 let handler_weak_inner = handler_weak.clone();
                 let db_conn_reader = db_conn_for_open.clone();
 
                 let reader = reader_zone::create_reader_view(book, *book_id, db_conn_reader, move || {
                     sidebar_b.set_visible(true);
-                    if let Some(handler_rc) = handler_weak_inner.upgrade() {
-                        if let Some(cb) = handler_rc.borrow().as_ref() {
-                            ref_back(cb.clone());
-                        }
+                    if let Some(refresh_rc) = ref_cell_inner.borrow().as_ref() {
+                        refresh_rc();
                     }
                 });
 
@@ -239,17 +292,11 @@ let active_idx = active_idx.unwrap_or(0);
         }));
     }
 
-    let get_open_cb = {
-        let handler_ref = open_book_handler.clone();
-        move || handler_ref.borrow().as_ref().unwrap().clone()
-    };
-
-    refresh_library(get_open_cb());
+    refresh_library_fn(get_open_cb());
 
     let books_for_add = books.clone();
     let conn_for_add = db_conn.clone();
-    let refresh_for_add = refresh_library.clone();
-    let get_open_for_add = get_open_cb.clone();
+    let ref_cell_for_add = refresh_library.clone();
     let on_book_added = Rc::new(move |(book, file_path): (ebook_parsers::ParsedBook, std::path::PathBuf)| {
         println!(
             "Добавлена книга: {} (глав: {})",
@@ -276,37 +323,41 @@ let active_idx = active_idx.unwrap_or(0);
         }
 
         books_for_add.borrow_mut().push((inserted_id, book));
-        refresh_for_add(get_open_for_add());
+        if let Some(refresh_rc) = ref_cell_for_add.borrow().as_ref() {
+            refresh_rc();
+        }
     });
 
     sidebar::create_sidebar(&sidebar_container, &window, on_book_added);
 
     let stack_for_reg = views_stack.clone();
     let sidebar_for_guest_auth = sidebar_container.clone();
-    let refresh_for_guest_auth = refresh_library.clone();
-    let get_open_for_guest_auth = get_open_cb.clone();
+    let ref_cell_for_guest_auth = refresh_library.clone();
     let auth = create_auth_view(
         move || {
             stack_for_reg.set_visible_child_name("register");
         },
         move || {
             sidebar_for_guest_auth.set_visible(true);
-            refresh_for_guest_auth(get_open_for_guest_auth());
+            if let Some(refresh_rc) = ref_cell_for_guest_auth.borrow().as_ref() {
+                refresh_rc();
+            }
         },
     );
     views_stack.add_named(&auth, Some("auth"));
 
     let stack_for_login = views_stack.clone();
     let sidebar_for_guest_reg = sidebar_container.clone();
-    let refresh_for_guest_reg = refresh_library.clone();
-    let get_open_for_guest_reg = get_open_cb.clone();
+    let ref_cell_for_guest_reg = refresh_library.clone();
     let register = create_register_view(
         move || {
             stack_for_login.set_visible_child_name("auth");
         },
         move || {
             sidebar_for_guest_reg.set_visible(true);
-            refresh_for_guest_reg(get_open_for_guest_reg());
+            if let Some(refresh_rc) = ref_cell_for_guest_reg.borrow().as_ref() {
+                refresh_rc();
+            }
         },
     );
     views_stack.add_named(&register, Some("register"));

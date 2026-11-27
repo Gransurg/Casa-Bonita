@@ -6,16 +6,19 @@ use gtk4::{
 };
 use std::rc::Rc;
 
-pub fn create_library_view<F>(
-    books: &[ParsedBook],
+pub fn create_library_view<F, D>(
+    books: &[(i64, ParsedBook)],
     active_book_progress: Option<(f64, i32)>,
     active_book_idx: usize,
     on_open_book: F,
+    on_delete_book: D,
 ) -> Widget
 where
     F: Fn(usize) + 'static,
+    D: Fn(i64) + 'static,
 {
     let open_book = Rc::new(on_open_book);
+    let delete_book = Rc::new(on_delete_book);
 
     let scrolled = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
@@ -44,14 +47,14 @@ where
     welcome_box.append(&subtitle_label);
     content_box.append(&welcome_box);
 
-    if let Some(book) = books.get(active_book_idx) {
+    if let Some((_, book)) = books.get(active_book_idx) {
         let cb_banner = open_book.clone();
         let idx = active_book_idx;
         let banner = create_reading_banner(book, active_book_progress, Rc::new(move || {
             cb_banner(idx); 
         }));
         content_box.append(&banner);
-    } else if let Some(first_book) = books.first() {
+    } else if let Some((_, first_book)) = books.first() {
         let cb_banner = open_book.clone();
         let banner = create_reading_banner(first_book, active_book_progress, Rc::new(move || {
             cb_banner(0);
@@ -59,7 +62,7 @@ where
         content_box.append(&banner);
     }
 
-    let shelf_section = create_shelf_section(books, open_book);
+    let shelf_section = create_shelf_section(books, open_book, delete_book);
     content_box.append(&shelf_section);
 
     let bottom_spacer = Box::new(Orientation::Vertical, 0);
@@ -190,7 +193,11 @@ fn create_reading_banner(
     banner_box.upcast()
 }
 
-fn create_shelf_section(books: &[ParsedBook], on_open_book: Rc<dyn Fn(usize)>) -> Widget {
+fn create_shelf_section(
+    books: &[(i64, ParsedBook)],
+    on_open_book: Rc<dyn Fn(usize)>,
+    on_delete_book: Rc<dyn Fn(i64)>,
+) -> Widget {
     let section_box = Box::new(Orientation::Vertical, 16);
 
     let header_box = Box::new(Orientation::Horizontal, 12);
@@ -226,9 +233,11 @@ fn create_shelf_section(books: &[ParsedBook], on_open_book: Rc<dyn Fn(usize)>) -
         books_grid.append(&empty_lbl);
     } else {
         let styles = ["book-cover-green", "book-cover-terracotta", "book-cover-slate", "book-cover-sand"];
-        for (i, book) in books.iter().enumerate() {
+        for (i, (book_id, book)) in books.iter().enumerate() {
             let style = styles[i % styles.len()];
             let cb_open = on_open_book.clone();
+            let cb_del = on_delete_book.clone();
+            let b_id = *book_id;
             let card = create_book_card(
                 &book.title,
                 &book.author,
@@ -236,6 +245,9 @@ fn create_shelf_section(books: &[ParsedBook], on_open_book: Rc<dyn Fn(usize)>) -
                 style,
                 Some(Rc::new(move || {
                     cb_open(i);
+                })),
+                Some(Rc::new(move || {
+                    cb_del(b_id);
                 })),
             );
             books_grid.append(&card);
@@ -252,6 +264,7 @@ fn create_book_card(
     progress: &str,
     cover_css: &str,
     on_click: Option<Rc<dyn Fn()>>,
+    on_delete: Option<Rc<dyn Fn()>>,
 ) -> Widget {
     let card_box = Box::new(Orientation::Vertical, 8);
     card_box.set_size_request(160, -1);
@@ -271,7 +284,49 @@ fn create_book_card(
         .margin_end(14)
         .build();
     cover.append(&title_in_cover);
-    card_box.append(&cover);
+
+    let overlay = gtk4::Overlay::new();
+    overlay.set_child(Some(&cover));
+
+    if let Some(del_cb) = on_delete {
+        let delete_btn = Button::builder()
+            .icon_name("user-trash-symbolic")
+            .css_classes(vec!["circular".to_string(), "flat".to_string(), "osd".to_string()])
+            .halign(gtk4::Align::End)
+            .valign(gtk4::Align::Start)
+            .margin_top(8)
+            .margin_end(8)
+            .visible(false)
+            .tooltip_text("Удалить книгу")
+            .build();
+
+        let delete_gesture = gtk4::GestureClick::new();
+        delete_gesture.set_button(1); 
+        let cb_del = del_cb.clone();
+        delete_gesture.connect_pressed(move |gesture, _, _, _| {
+            cb_del();
+            gesture.set_state(gtk4::EventSequenceState::Claimed); 
+        });
+        delete_btn.add_controller(delete_gesture);
+
+        delete_btn.connect_clicked(move |_| {
+        });
+
+        let motion = gtk4::EventControllerMotion::new();
+        let btn_enter = delete_btn.clone();
+        motion.connect_enter(move |_, _, _| {
+            btn_enter.set_visible(true);
+        });
+        let btn_leave = delete_btn.clone();
+        motion.connect_leave(move |_| {
+            btn_leave.set_visible(false);
+        });
+        overlay.add_controller(motion);
+
+        overlay.add_overlay(&delete_btn);
+    }
+
+    card_box.append(&overlay);
 
     let t_label = Label::builder()
         .label(title)
@@ -298,17 +353,14 @@ fn create_book_card(
     card_box.append(&p_label);
 
     if let Some(cb) = on_click {
-        let btn = Button::builder()
-            .child(&card_box)
-            .css_classes(vec!["flat".to_string()])
-            .build();
-        btn.connect_clicked(move |_| {
+        let click_gesture = gtk4::GestureClick::new();
+        click_gesture.connect_pressed(move |_, _, _, _| {
             cb();
         });
-        btn.upcast()
-    } else {
-        card_box.upcast()
+        card_box.add_controller(click_gesture);
     }
+
+    card_box.upcast()
 }
 
 fn create_footer_bar(count: usize) -> Widget {
