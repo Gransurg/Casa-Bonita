@@ -8,7 +8,8 @@ use std::rc::Rc;
 
 pub fn create_library_view<F>(
     books: &[ParsedBook],
-    first_book_progress: Option<(f64, i32)>,
+    active_book_progress: Option<(f64, i32)>,
+    active_book_idx: usize,
     on_open_book: F,
 ) -> Widget
 where
@@ -43,20 +44,19 @@ where
     welcome_box.append(&subtitle_label);
     content_box.append(&welcome_box);
 
-    if let Some(first_book) = books.first() {
+    if let Some(book) = books.get(active_book_idx) {
         let cb_banner = open_book.clone();
-        let banner = create_reading_banner(first_book, first_book_progress, Rc::new(move || {
+        let idx = active_book_idx;
+        let banner = create_reading_banner(book, active_book_progress, Rc::new(move || {
+            cb_banner(idx); 
+        }));
+        content_box.append(&banner);
+    } else if let Some(first_book) = books.first() {
+        let cb_banner = open_book.clone();
+        let banner = create_reading_banner(first_book, active_book_progress, Rc::new(move || {
             cb_banner(0);
         }));
         content_box.append(&banner);
-    } else {
-        let empty_banner = Label::builder()
-            .label("Ваша полка пока пуста. Нажмите «+ Добавить книгу» в сайдбаре.")
-            .halign(gtk4::Align::Start)
-            .css_classes(vec!["dim-label".to_string()])
-            .margin_top(12)
-            .build();
-        content_box.append(&empty_banner);
     }
 
     let shelf_section = create_shelf_section(books, open_book);

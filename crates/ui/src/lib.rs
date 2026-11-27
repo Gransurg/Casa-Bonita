@@ -83,11 +83,36 @@ fn build_ui(app: &Application) {
     let conn_for_books = db_conn.clone();
     let load_books_from_db = move || -> Vec<(i64, ebook_parsers::ParsedBook)> {
         let conn = conn_for_books.borrow();
+        let mut stmt = conn.prepare("SELECT book_id, last_position, percentage FROM reading_progress").unwrap();
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?))
+        }).unwrap();
+                
+        for r in rows {
+            println!("DEBUG DB PROGRESS: {:?}", r);
+        }
         match ebook_db::BookRepository::get_all_books(&conn) {
             Ok(book_models) => {
                 let mut parsed_books = Vec::new();
                 for m in book_models {
-                    let book_id = m.id.parse::<i64>().unwrap_or(0);
+                    // Запрашиваем реальный числовой id книги из SQLite по ее пути, пущто UUID это
+                    // не числовой айди из бд
+                let file_path_str = m.file_path.to_string_lossy();
+                let book_id: i64 = match conn.query_row(
+                    "SELECT id FROM books WHERE file_path = ?1",
+                    rusqlite::params![file_path_str.as_ref()],
+                    |row| row.get(0),
+                ) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        eprintln!(
+                            "Не удалось получить id книги по пути {}: {err}",
+                            m.file_path.display()
+                        );
+                        continue; // пропускаем книгу без валидного id
+                    }
+                };
+
                     let parser = ebook_parsers::Fb2Parser::new();
                     if let Ok(parsed) = parser.parse(&m.file_path) {
                         parsed_books.push((book_id, parsed));
@@ -114,29 +139,59 @@ fn build_ui(app: &Application) {
     let refresh_library: Rc<dyn Fn(Rc<dyn Fn(usize)>)> = {
         let stack_ref = views_stack.clone();
         let books_ref = books.clone();
-        let db_conn_for_views = db_conn.clone(); 
+        let db_conn_for_views = db_conn.clone();
 
         Rc::new(move |on_open_book_cb: Rc<dyn Fn(usize)>| {
             let b_list = books_ref.borrow();
             let parsed_only: Vec<ebook_parsers::ParsedBook> = b_list.iter().map(|(_, b)| b.clone()).collect();
-            
-            let mut first_progress = None;
-            if let Some((book_id, book)) = b_list.first() {
-                let conn = db_conn_for_views.borrow();
-                if let Ok(Some((last_pos, percentage, _))) = ebook_db::ProgressRepository::get_progress(&conn, *book_id) {
-                    let parts: Vec<&str> = last_pos.split(':').collect();
-                    let chapter_idx = if parts.len() == 2 {
-                        parts[0].parse::<usize>().unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    first_progress = Some((percentage, chapter_idx as i32));
-                }
-            }
 
-            let library_view = create_library_view(&parsed_only, first_progress, move |idx| {
-                on_open_book_cb(idx);
-            });
+        let mut active_idx: Option<usize> = None;
+        let mut active_progress = None;
+
+        {
+            let conn = db_conn_for_views.borrow();
+
+            let mut stmt = conn
+                .prepare(
+                    "SELECT book_id FROM reading_progress ORDER BY last_read_at DESC",
+                )
+                .unwrap();
+
+            let ids_iter = stmt
+                .query_map([], |row| row.get::<_, i64>(0))
+                .unwrap();
+
+            for id_res in ids_iter {
+                let Ok(b_id) = id_res else { continue };
+                if let Some(pos) = b_list.iter().position(|(id, _)| *id == b_id) {
+                    active_idx = Some(pos);
+
+                    if let Ok(Some((last_pos, percentage, _))) =
+                        ebook_db::ProgressRepository::get_progress(&conn, b_id)
+                    {
+                        let parts: Vec<&str> = last_pos.split(':').collect();
+                        let chapter_idx = if parts.len() == 2 {
+                            parts[0].parse::<usize>().unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        active_progress = Some((percentage, chapter_idx as i32));
+            }
+            break; // нашли самую свежую из присутствующих — дальше не идём
+        }
+    }
+}
+
+let active_idx = active_idx.unwrap_or(0);
+
+            let library_view = create_library_view(
+                &parsed_only,
+                active_progress,
+                active_idx, 
+                move |idx| {
+                    on_open_book_cb(idx);
+                },
+            );
 
             if let Some(old_library) = stack_ref.child_by_name("library") {
                 stack_ref.remove(&old_library);
